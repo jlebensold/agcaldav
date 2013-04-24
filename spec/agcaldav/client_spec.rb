@@ -4,8 +4,9 @@ require 'fakeweb'
 
 require 'agcaldav'
 
-describe AgCalDAV::Client do
 
+describe AgCalDAV::Client do
+  
   before(:each) do
     @c = AgCalDAV::Client.new(:uri => "http://localhost:5232/user/calendar", :user => "user" , :password => "")
   end

@@ -1,3 +1,5 @@
+require 'curb'
+require 'tzinfo'
 module AgCalDAV
   class Client
     include Icalendar
@@ -62,63 +64,63 @@ module AgCalDAV
       result = ""
       events = []
       res = nil
-      __create_http.start {|http|
-      	
-        req = Net::HTTP::Report.new(@url, initheader = {'Content-Type'=>'application/xml'} )
-        
-		if not @authtype == 'digest'
-			req.basic_auth @user, @password
-		else
-			req.add_field 'Authorization', digestauth('REPORT')
-		end
-		    if data[:start].is_a? Integer
-          req.body = AgCalDAV::Request::ReportVEVENT.new(Time.at(data[:start]).utc.strftime("%Y%m%dT%H%M%S"), 
-                                                        Time.at(data[:end]).utc.strftime("%Y%m%dT%H%M%S") ).to_xml
-        else
-          req.body = AgCalDAV::Request::ReportVEVENT.new(DateTime.parse(data[:start]).utc.strftime("%Y%m%dT%H%M%S"), 
-                                                        DateTime.parse(data[:end]).utc.strftime("%Y%m%dT%H%M%S") ).to_xml
-        end
-        res = http.request(req)
-      } 
-        errorhandling res
-        result = ""
-        
-        xml = REXML::Document.new(res.body)
-        REXML::XPath.each( xml, '//c:calendar-data/', {"c"=>"urn:ietf:params:xml:ns:caldav"} ){|c| result << c.text}
-        r = Icalendar.parse(result)      
-        unless r.empty?
-          r.each do |calendar|
-            calendar.events.each do |event|
-              events << event
-            end
+
+		  if data[:start].is_a? Integer
+        body = AgCalDAV::Request::ReportVEVENT.new(Time.at(data[:start]).strftime("%Y%m%dT%H%M%S"), 
+                                                      Time.at(data[:end]).strftime("%Y%m%dT%H%M%S") ).to_xml
+      else
+        body = AgCalDAV::Request::ReportVEVENT.new(DateTime.parse(data[:start]).strftime("%Y%m%dT%H%M%S"), 
+                                                      DateTime.parse(data[:end]).strftime("%Y%m%dT%H%M%S") ).to_xml
+      end
+      responses = []
+      xml =''
+      url = "#{(@ssl) ? "https" : "http"}://#{@host}:#{@port}#{@url}/"
+      c = Curl::http :REPORT, url, nil, body do |curl|
+        curl.http_auth_types = :digest  if (@authtype == 'digest')
+        curl.headers['Content-Type'] = 'application/xml'
+        curl.username = @user
+        curl.password = @password
+        curl.on_body { |data| 
+          responses << data
+        }
+      end
+      c.perform
+      result = ''
+      xml = REXML::Document.new(responses.first)
+      REXML::XPath.each( xml, '//c:calendar-data/', {"c"=>"urn:ietf:params:xml:ns:caldav"} ){ |c| 
+        puts "<<<<";
+        puts c.text;
+        result << c.text}
+      r = Icalendar.parse(result)
+      unless r.empty?
+        r.each do |calendar|
+          calendar.events.each do |event|
+            events << event
           end
-          events
-        else
-          return false
         end
+        events
+      else
+        return false
+      end
     end
 
     def find_event uuid
-      res = nil
-      __create_http.start {|http|
-        req = Net::HTTP::Get.new("#{@url}/#{uuid}.ics")        
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('GET')
-        end
-        res = http.request( req )
-      }  
-      errorhandling res
+      url = "#{(@ssl) ? "https" : "http"}://#{@host}:#{@port}#{@url}/#{uuid}.ics"
+      c = Curl::Easy.new(url) do |curl|
+        curl.http_auth_types = :digest  if (@authtype == 'digest')
+        curl.username = @user
+        curl.password = @password
+        curl.on_body { |data| response = data ; data.size }
+      end
+      c.perform
       begin
-      	r = Icalendar.parse(res.body)
+      	r = Icalendar.parse(response)
       rescue
       	return false
       else
       	r.first.events.first 
       end
 
-      
     end
 
     def delete_event uuid
@@ -142,13 +144,36 @@ module AgCalDAV
 
     def create_event event
       c = Calendar.new
+
+=begin
+      c.timezone do
+        timezone_id             "Europe/Paris"
+        daylight do
+          timezone_offset_from  "+0200"
+          timezone_offset_to    "+0100"
+          timezone_name         "GMT+01:00"
+          dtstart               "19961027T030000"
+          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3"
+        end
+
+        standard do
+          timezone_offset_from  "+0100"
+          timezone_offset_to    "+0200"
+          timezone_name         "GMT+01:00"
+          dtstart               "19961027T030000"
+          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10"
+        end
+      end
+=end
+
       c.events = []
       uuid = UUID.new.generate
       raise DuplicateError if entry_with_uuid_exists?(uuid)
       c.event do
         uid           uuid 
-        dtstart       DateTime.parse(event[:start])
-        dtend         DateTime.parse(event[:end])
+        dtstart       event[:start].strftime("%Y%m%dT%H%M%SZ")
+        dtend         event[:end].strftime("%Y%m%dT%H%M%SZ")
+        dtstamp       DateTime.now.strftime("%Y%m%dT%H%M%SZ")
         categories    event[:categories]# Array
         contacts       event[:contacts] # Array
         attendees      event[:attendees]# Array
@@ -162,19 +187,16 @@ module AgCalDAV
       end
       cstring = c.to_ical
       res = nil
-      http = Net::HTTP.new(@host, @port)
-      __create_http.start { |http|
-        req = Net::HTTP::Put.new("#{@url}/#{uuid}.ics")
-        req['Content-Type'] = 'text/calendar'
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('PUT')
+      
+      url = "#{(@ssl) ? "https" : "http"}://#{@host}:#{@port}#{@url}/#{uuid}.ics"
+      c = Curl::Easy.http_put(url,cstring) do |curl|
+        if (@authtype == 'digest')
+          curl.http_auth_types = :digest
         end
-        req.body = cstring
-        res = http.request( req )
-      }
-      errorhandling res
+        curl.headers['Content-Type'] = 'text/calendar'
+        curl.username = @user
+        curl.password = @password
+      end
       find_event uuid
     end
 
@@ -279,7 +301,16 @@ module AgCalDAV
 	    
 	    res = h.request req
 	    # res is a 401 response with a WWW-Authenticate header
-	    
+      
+      require 'pp'
+      puts ">>>>>>>"
+      pp res
+      puts "<<<<<<<"
+      pp @digest_auth
+      puts ">>>>>>>"
+      pp @duri
+      puts "<<<<<<<"
+      pp res
 	    auth = @digest_auth.auth_header @duri, res['www-authenticate'], method
 	    
     	return auth
@@ -287,26 +318,11 @@ module AgCalDAV
     
     def entry_with_uuid_exists? uuid
       res = nil
-      
-      __create_http.start {|http|
-        req = Net::HTTP::Get.new("#{@url}/#{uuid}.ics")
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('GET')
-        end
-        
-        res = http.request( req )
-      	
-      }
-      begin
-      	Icalendar.parse(res.body)
-      rescue
-      	return false
-      else
-      	return true
-      end
+      e = find_event uuid
+      return false if e == false
+      true
     end
+    
     def  errorhandling response   
       raise AuthenticationError if response.code.to_i == 401
       raise NotExistError if response.code.to_i == 410 
