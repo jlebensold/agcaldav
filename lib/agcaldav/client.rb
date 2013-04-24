@@ -270,50 +270,10 @@ module AgCalDAV
       find_todo uuid
     end
 
-    def create_todo
-      res = nil
-      raise DuplicateError if entry_with_uuid_exists?(uuid)
-
-      __create_http.start {|http|
-        req = Net::HTTP::Report.new(@url, initheader = {'Content-Type'=>'application/xml'} )
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('REPORT')
-        end
-        req.body = AgCalDAV::Request::ReportVTODO.new.to_xml
-        res = http.request( req )
-      }
-      errorhandling res 
-      format.parse_todo( res.body )
-    end
-
     private
     
     def digestauth method
-		
-	    h = Net::HTTP.new @duri.host, @duri.port
-	    if @ssl
-	    	h.use_ssl = @ssl
-	    	h.verify_mode = OpenSSL::SSL::VERIFY_NONE
-	    end
-	    req = Net::HTTP::Get.new @duri.request_uri
-	    
-	    res = h.request req
-	    # res is a 401 response with a WWW-Authenticate header
-      
-      require 'pp'
-      puts ">>>>>>>"
-      pp res
-      puts "<<<<<<<"
-      pp @digest_auth
-      puts ">>>>>>>"
-      pp @duri
-      puts "<<<<<<<"
-      pp res
-	    auth = @digest_auth.auth_header @duri, res['www-authenticate'], method
-	    
-    	return auth
+	    raise "not implemented"	
     end
     
     def entry_with_uuid_exists? uuid
