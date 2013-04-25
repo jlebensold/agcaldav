@@ -1,5 +1,3 @@
-require 'curb'
-require 'tzinfo'
 module AgCalDAV
   class Client
     include Icalendar
@@ -57,7 +55,7 @@ module AgCalDAV
       end
       responses = []
       xml =''
-      c = Curl::http :REPORT, base_url(), nil, body do |curl|
+      c = Curl::http :REPORT, "#{base_uri}/", nil, body do |curl|
         curl.http_auth_types = :digest  if (@authtype == 'digest')
         curl.headers['Content-Type'] = 'application/xml'
         curl.username = @user
@@ -170,7 +168,6 @@ module AgCalDAV
     end
     
     def  errorhandling code
-      pp code
       raise AuthenticationError if code == 401
       raise NotExistError if code == 410 
       raise APIError if code >= 500
