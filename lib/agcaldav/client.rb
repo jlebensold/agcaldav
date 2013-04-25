@@ -4,29 +4,29 @@ module AgCalDAV
   class Client
     include Icalendar
     attr_accessor :host, :port, :url, :user, :password, :ssl, :shared_calendar
-
-=begin
-    def timezone_standard block
-      block.timezone do
-        timezone_id             "Europe/Paris"
+    
+    def new_calendar
+      c = Calendar.new
+      c.timezone do
+        timezone_id             "Pacific Standard Time"
         daylight do
-          timezone_offset_from  "+0200"
-          timezone_offset_to    "+0100"
-          timezone_name         "GMT+01:00"
-          dtstart               "19961027T030000"
-          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3"
+          dtstart               "16010311T020000"
+          add_recurrence_rule   "FREQ=YEARLY;BYDAY=2SU;BYMONTH=3"
+          timezone_offset_from  "-0800"
+          timezone_offset_to    "-0700"
         end
 
         standard do
-          timezone_offset_from  "+0100"
-          timezone_offset_to    "+0200"
-          timezone_name         "GMT+01:00"
-          dtstart               "19961027T030000"
-          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10"
+          dtstart               "16010311T020000"
+          add_recurrence_rule   "FREQ=YEARLY;BYDAY=1SU;BYMONTH=11"
+          timezone_offset_from  "-0700"
+          timezone_offset_to    "-0800"
         end
       end
+      c.events = []
+      c
     end
-=end
+
     def initialize( data )
       uri = URI(data[:uri])
       @host     = uri.host
@@ -97,7 +97,6 @@ module AgCalDAV
       else
       	r.first.events.first 
       end
-
     end
 
     def delete_event uuid
@@ -111,12 +110,9 @@ module AgCalDAV
       end
       return ! entry_with_uuid_exists?(uuid)
     end
-
+    
     def create_event event
-      c = Calendar.new
-      #c.timezone = timezone_standard()
-      
-      c.events = []
+      c = new_calendar
       uuid = UUID.new.generate
       raise DuplicateError if entry_with_uuid_exists?(uuid)
       c.event do
@@ -135,7 +131,6 @@ module AgCalDAV
         geo_location  event[:geo_location]
         status        event[:status]
       end
-      res = nil
       c = Curl::Easy.http_put([base_uri, "#{uuid}.ics"].join('/'),c.to_ical) do |curl|
         if (@authtype == 'digest')
           curl.http_auth_types = :digest
@@ -143,7 +138,6 @@ module AgCalDAV
         curl.headers['Content-Type'] = 'text/calendar'
         curl.username = @user
         curl.password = @password
-      #  curl.on_body { |data|  }
       end
       find_event uuid
     end
@@ -170,7 +164,6 @@ module AgCalDAV
   private
     
     def entry_with_uuid_exists? uuid
-      res = nil
       e = find_event uuid
       return false if e == false
       true
