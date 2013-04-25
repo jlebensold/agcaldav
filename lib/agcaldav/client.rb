@@ -3,7 +3,7 @@ require 'tzinfo'
 module AgCalDAV
   class Client
     include Icalendar
-    attr_accessor :host, :port, :url, :user, :password, :ssl
+    attr_accessor :host, :port, :url, :user, :password, :ssl, :shared_calendar
 
     def format=( fmt )
       @format = fmt
@@ -14,16 +14,11 @@ module AgCalDAV
     end
 
     def initialize( data )
-      unless data[:proxy_uri].nil?
-        proxy_uri   = URI(data[:proxy_uri])
-        @proxy_host = proxy_uri.host
-        @proxy_port = proxy_uri.port.to_i
-      end
       
       uri = URI(data[:uri])
       @host     = uri.host
       @port     = uri.port.to_i
-      @url      = uri.path
+      @url      = (data[:shared_calendar].nil?) ? uri.path : "#{uri.path}/#{data[:shared_calendar]}"
       @user     = data[:user]
       @password = data[:password]
       @ssl      = uri.scheme == 'https'
@@ -74,23 +69,17 @@ module AgCalDAV
       end
       responses = []
       xml =''
-      url = "#{(@ssl) ? "https" : "http"}://#{@host}:#{@port}#{@url}/"
-      c = Curl::http :REPORT, url, nil, body do |curl|
+      c = Curl::http :REPORT, base_url(), nil, body do |curl|
         curl.http_auth_types = :digest  if (@authtype == 'digest')
         curl.headers['Content-Type'] = 'application/xml'
         curl.username = @user
         curl.password = @password
-        curl.on_body { |data| 
-          responses << data
-        }
+        curl.on_body { |data| responses << data; data.size }
       end
       c.perform
       result = ''
       xml = REXML::Document.new(responses.first)
-      REXML::XPath.each( xml, '//c:calendar-data/', {"c"=>"urn:ietf:params:xml:ns:caldav"} ){ |c| 
-        puts "<<<<";
-        puts c.text;
-        result << c.text}
+      REXML::XPath.each( xml, '//c:calendar-data/', {"c"=>"urn:ietf:params:xml:ns:caldav"} ){ |c|  result << c.text}
       r = Icalendar.parse(result)
       unless r.empty?
         r.each do |calendar|
@@ -105,7 +94,8 @@ module AgCalDAV
     end
 
     def find_event uuid
-      url = "#{(@ssl) ? "https" : "http"}://#{@host}:#{@port}#{@url}/#{uuid}.ics"
+      url = [base_uri, "#{uuid}.ics"].join('/') 
+      response = ''
       c = Curl::Easy.new(url) do |curl|
         curl.http_auth_types = :digest  if (@authtype == 'digest')
         curl.username = @user
@@ -170,7 +160,7 @@ module AgCalDAV
       uuid = UUID.new.generate
       raise DuplicateError if entry_with_uuid_exists?(uuid)
       c.event do
-        uid           uuid 
+        uid           uuid
         dtstart       event[:start].strftime("%Y%m%dT%H%M%SZ")
         dtend         event[:end].strftime("%Y%m%dT%H%M%SZ")
         dtstamp       DateTime.now.strftime("%Y%m%dT%H%M%SZ")
@@ -187,8 +177,7 @@ module AgCalDAV
       end
       cstring = c.to_ical
       res = nil
-      
-      url = "#{(@ssl) ? "https" : "http"}://#{@host}:#{@port}#{@url}/#{uuid}.ics"
+      url = [base_uri, "#{uuid}.ics"].join('/') 
       c = Curl::Easy.http_put(url,cstring) do |curl|
         if (@authtype == 'digest')
           curl.http_auth_types = :digest
@@ -196,9 +185,16 @@ module AgCalDAV
         curl.headers['Content-Type'] = 'text/calendar'
         curl.username = @user
         curl.password = @password
+      #  curl.on_body { |data|  }
       end
       find_event uuid
     end
+
+    def base_uri
+      protocol = @ssl ? "https" : "http"
+      "#{protocol}://#{@host}:#{@port}#{@url}"
+    end
+
 
     def update_event event
       #TODO... fix me
@@ -209,66 +205,7 @@ module AgCalDAV
       end
     end
 
-    def add_alarm tevent, altCal="Calendar"
-    
-    end
 
-    def find_todo uuid
-      res = nil
-      __create_http.start {|http|
-        req = Net::HTTP::Get.new("#{@url}/#{uuid}.ics")
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('GET')
-        end
-        res = http.request( req )
-      }  
-      errorhandling res
-      r = Icalendar.parse(res.body)
-      r.first.todos.first
-    end
-
-
-
-
-
-    def create_todo todo
-      c = Calendar.new
-      uuid = UUID.new.generate
-      raise DuplicateError if entry_with_uuid_exists?(uuid)
-      c.todo do
-        uid           uuid 
-        start         DateTime.parse(todo[:start])
-        duration      todo[:duration]
-        summary       todo[:title]
-        description   todo[:description]
-        klass         todo[:accessibility] #PUBLIC, PRIVATE, CONFIDENTIAL
-        location      todo[:location]
-        percent       todo[:percent]
-        priority      todo[:priority]
-        url           todo[:url]
-        geo           todo[:geo_location]
-        status        todo[:status]
-      end
-      c.todo.uid = uuid
-      cstring = c.to_ical
-      res = nil
-      http = Net::HTTP.new(@host, @port)
-      __create_http.start { |http|
-        req = Net::HTTP::Put.new("#{@url}/#{uuid}.ics")
-        req['Content-Type'] = 'text/calendar'
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('PUT')
-        end
-        req.body = cstring
-        res = http.request( req )
-      }
-      errorhandling res
-      find_todo uuid
-    end
 
     private
     
