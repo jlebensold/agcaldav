@@ -5,16 +5,29 @@ module AgCalDAV
     include Icalendar
     attr_accessor :host, :port, :url, :user, :password, :ssl, :shared_calendar
 
-    def format=( fmt )
-      @format = fmt
-    end
+=begin
+    def timezone_standard block
+      block.timezone do
+        timezone_id             "Europe/Paris"
+        daylight do
+          timezone_offset_from  "+0200"
+          timezone_offset_to    "+0100"
+          timezone_name         "GMT+01:00"
+          dtstart               "19961027T030000"
+          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3"
+        end
 
-    def format
-      @format ||= Format::Debug.new
+        standard do
+          timezone_offset_from  "+0100"
+          timezone_offset_to    "+0200"
+          timezone_name         "GMT+01:00"
+          dtstart               "19961027T030000"
+          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10"
+        end
+      end
     end
-
+=end
     def initialize( data )
-      
       uri = URI(data[:uri])
       @host     = uri.host
       @port     = uri.port.to_i
@@ -25,34 +38,9 @@ module AgCalDAV
       
       unless data[:authtype].nil?
       	@authtype = data[:authtype]
-      	if @authtype == 'digest'
-      	
-      		@digest_auth = Net::HTTP::DigestAuth.new
-      		@duri = URI.parse data[:uri]
-      		@duri.user = @user
-      		@duri.password = @password
-      		
-      	elsif @authtype == 'basic'
-	    	#Don't Raise or do anything else
 	    else
-	    	raise "Authentication Type Specified Is Not Valid. Please use basic or digest"
-	    end
-      else
       	@authtype = 'basic'
       end
-    end
-
-    def __create_http
-      if @proxy_uri.nil?
-        http = Net::HTTP.new(@host, @port)
-      else
-        http = Net::HTTP.new(@host, @port, @proxy_host, @proxy_port)
-      end
-      if @ssl
-        http.use_ssl = @ssl
-        http.verify_mode = OpenSSL::SSL::VERIFY_NONE
-      end
-      http
     end
 
     def find_events data
@@ -94,9 +82,8 @@ module AgCalDAV
     end
 
     def find_event uuid
-      url = [base_uri, "#{uuid}.ics"].join('/') 
       response = ''
-      c = Curl::Easy.new(url) do |curl|
+      c = Curl::Easy.new([base_uri, "#{uuid}.ics"].join('/')) do |curl|
         curl.http_auth_types = :digest  if (@authtype == 'digest')
         curl.username = @user
         curl.password = @password
@@ -115,47 +102,20 @@ module AgCalDAV
 
     def delete_event uuid
       res = nil
-      __create_http.start {|http|
-        req = Net::HTTP::Delete.new("#{@url}/#{uuid}.ics")
-        if not @authtype == 'digest'
-        	req.basic_auth @user, @password
-        else
-        	req.add_field 'Authorization', digestauth('DELETE')
+      c = Curl::Easy.http_delete([base_uri, "#{uuid}.ics"].join('/')) do |curl|
+        if (@authtype == 'digest')
+          curl.http_auth_types = :digest
         end
-        res = http.request( req )
-      }
-      errorhandling res
-      if res.code.to_i == 200
-        return true
-      else
-        return false
+        curl.username = @user
+        curl.password = @password
       end
+      return ! entry_with_uuid_exists?(uuid)
     end
 
     def create_event event
       c = Calendar.new
-
-=begin
-      c.timezone do
-        timezone_id             "Europe/Paris"
-        daylight do
-          timezone_offset_from  "+0200"
-          timezone_offset_to    "+0100"
-          timezone_name         "GMT+01:00"
-          dtstart               "19961027T030000"
-          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=3"
-        end
-
-        standard do
-          timezone_offset_from  "+0100"
-          timezone_offset_to    "+0200"
-          timezone_name         "GMT+01:00"
-          dtstart               "19961027T030000"
-          add_recurrence_rule   "FREQ=YEARLY;BYDAY=-1SU;BYMONTH=10"
-        end
-      end
-=end
-
+      #c.timezone = timezone_standard()
+      
       c.events = []
       uuid = UUID.new.generate
       raise DuplicateError if entry_with_uuid_exists?(uuid)
@@ -175,10 +135,8 @@ module AgCalDAV
         geo_location  event[:geo_location]
         status        event[:status]
       end
-      cstring = c.to_ical
       res = nil
-      url = [base_uri, "#{uuid}.ics"].join('/') 
-      c = Curl::Easy.http_put(url,cstring) do |curl|
+      c = Curl::Easy.http_put([base_uri, "#{uuid}.ics"].join('/'),c.to_ical) do |curl|
         if (@authtype == 'digest')
           curl.http_auth_types = :digest
         end
@@ -197,9 +155,11 @@ module AgCalDAV
 
 
     def update_event event
-      #TODO... fix me
-      if delete_event event[:uid]
-        create_event event
+      props = event.properties.inject({}){|memo,(k,v)| memo[k.to_sym] = v; memo}
+      if delete_event props[:uid]
+        props[:start] = props[:dtstart] if props[:start].nil?
+        props[:end] = props[:dtend] if props[:end].nil?
+        create_event props 
       else
         return false
       end
@@ -207,11 +167,7 @@ module AgCalDAV
 
 
 
-    private
-    
-    def digestauth method
-	    raise "not implemented"	
-    end
+  private
     
     def entry_with_uuid_exists? uuid
       res = nil
@@ -220,13 +176,13 @@ module AgCalDAV
       true
     end
     
-    def  errorhandling response   
-      raise AuthenticationError if response.code.to_i == 401
-      raise NotExistError if response.code.to_i == 410 
-      raise APIError if response.code.to_i >= 500
+    def  errorhandling code
+      pp code
+      raise AuthenticationError if code == 401
+      raise NotExistError if code == 410 
+      raise APIError if code >= 500
     end
   end
-
 
   class AgCalDAVError < StandardError
   end
