@@ -109,9 +109,9 @@ module AgCalDAV
       return ! entry_with_uuid_exists?(uuid)
     end
     
-    def create_event event
+    def create_event event, uuid=nil
       c = new_calendar
-      uuid = UUID.new.generate
+      uuid = UUID.new.generate if uuid.nil?
       raise DuplicateError if entry_with_uuid_exists?(uuid)
       c.event do
         uid           uuid
