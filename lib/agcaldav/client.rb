@@ -92,8 +92,11 @@ module AgCalDAV
       	r = Icalendar.parse(response)
       rescue
       	return false
-      else
-      	r.first.events.first 
+      else       
+        if (r.count > 0)
+          return r.first.events.first 
+        end
+        return false
       end
     end
 
