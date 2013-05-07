@@ -6,20 +6,8 @@ module AgCalDAV
     def new_calendar
       c = Calendar.new
       c.timezone do
-        timezone_id             "Pacific Standard Time"
-        daylight do
-          dtstart               "16010311T020000"
-          add_recurrence_rule   "FREQ=YEARLY;BYDAY=2SU;BYMONTH=3"
-          timezone_offset_from  "-0800"
-          timezone_offset_to    "-0700"
-        end
-
-        standard do
-          dtstart               "16010311T020000"
-          add_recurrence_rule   "FREQ=YEARLY;BYDAY=1SU;BYMONTH=11"
-          timezone_offset_from  "-0700"
-          timezone_offset_to    "-0800"
-        end
+        timezone_id             "Universal Time Coordinated"
+        tzname                  "UTC"
       end
       c.events = []
       c
