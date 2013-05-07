@@ -5,10 +5,6 @@ module AgCalDAV
     
     def new_calendar
       c = Calendar.new
-      c.timezone do
-        timezone_id             "Universal Time Coordinated"
-        tzname                  "UTC"
-      end
       c.events = []
       c
     end
